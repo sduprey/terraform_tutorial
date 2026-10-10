@@ -1,0 +1,14 @@
+# LocalStack : émulateur local des API (Application Programming Interface) AWS.
+# Démarrage conseillé : ./scripts/localstack.sh start (choisit l'image selon le jeton).
+services:
+  localstack:
+    container_name: localstack-terraform-lab
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:4.12}
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
+      - SERVICES=ec2,s3,iam,sts,resourcegroupstaggingapi
+      - PERSISTENCE=${PERSISTENCE:-0}
+    volumes:
+      - ./.localstack-data:/var/lib/localstack
