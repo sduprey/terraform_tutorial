@@ -1,0 +1,31 @@
+# --- Terraform ---------------------------------------------------------------
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+# Écrit par tflocal à chaque commande
+localstack_providers_override.tf
+# Écrits par 00-setup/creer-infra-manuelle.sh (identifiants propres à ton LocalStack)
+terraform.tfvars
+00-setup/ids-crees.tfvars
+
+# --- LocalStack --------------------------------------------------------------
+.localstack-data/
+
+# --- Python ------------------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# --- Secrets (jeton LocalStack, etc.) ----------------------------------------
+.env
+.env.*
+
+# --- macOS / éditeurs --------------------------------------------------------
+.DS_Store
+.vscode/
+.idea/

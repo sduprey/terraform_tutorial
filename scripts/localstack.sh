@@ -45,7 +45,8 @@ case "${1:-}" in
 import json, sys
 s = json.load(sys.stdin)["services"]
 for nom in ("ec2", "s3", "iam", "sts"):
-    print(f"  {nom:4s} : {s.get(nom, \"absent\")}")
+    etat = s.get(nom, "absent")
+    print(f"  {nom:4s} : {etat}")
 ' ;;
   *) echo "Usage : $0 start|stop|status|logs|reset"; exit 1 ;;
 esac
