@@ -32,6 +32,66 @@ acyclique.
 > Le state est le cœur du système. Un expert Terraform est avant tout
 > quelqu'un qui sait manipuler le state sans rien casser.
 
+### State ou réel : quelle différence ?
+
+Les deux semblent décrire « ce qui existe ». Ils ne le décrivent pas de la
+même manière.
+
+- **Le réel** est ce qu'AWS répond **maintenant** quand on l'interroge, avec
+  l'AWS CLI (Command Line Interface) ou la console.
+- **Le state** est le carnet de notes de Terraform, un fichier sur ton disque.
+  Il ne décrit pas le monde. Il note **ce que Terraform gère, et à quoi ça
+  correspond chez AWS** :
+
+  ```
+  aws_vpc.main  →  vpc-1a2b3c   (vu la dernière fois avec cidr 10.42.0.0/16, dns_hostnames=true…)
+  ```
+
+  Il sert donc à deux choses : **le lien** entre un nom du code et un objet
+  réel, et **une photo** des attributs telle que Terraform les a vus la
+  dernière fois.
+
+On les consulte avec des outils différents :
+
+```bash
+aws ec2 describe-vpcs              # le réel
+terraform state list               # le state : ce que Terraform gère
+terraform state show aws_vpc.main  # le state : la photo d'une ressource
+```
+
+Une analogie : le réel est le contenu d'un entrepôt, le state est le registre
+du magasinier (« l'étagère B3, c'est moi qui m'en occupe, et la dernière fois
+il y avait 12 cartons »), et le code est la consigne (« il doit y avoir
+12 cartons en B3 »). Le registre peut se tromper. Quelqu'un a pu prendre un
+carton sans le noter : c'est le **drift** (leçon 3). Un objet peut aussi être
+dans l'entrepôt sans figurer au registre : le magasinier l'ignore
+complètement.
+
+Dans le labo, les trois éléments évoluent ainsi :
+
+| Moment | Réel | State | Code |
+|---|---|---|---|
+| Après `make setup` (exercice 1) | 8 objets | **vide** | vide |
+| Après l'import (exercice 2) | 8 objets | 8 entrées liées aux identifiants | 8 ressources |
+| Modification à la main dans la console (exercice 4) | règle ajoutée | ancienne photo | inchangé |
+
+La première ligne est tout l'enjeu de l'extraction. Le réel existe, mais
+**Terraform ne le voit pas**, puisque rien ne figure dans son state. Si tu
+écrivais `resource "aws_vpc" "main" {...}` sans importer, Terraform créerait un
+**deuxième** VPC. Le bloc `import` (leçon 1) remplit le state : « ce
+`vpc-1a2b3c` existant, c'est `aws_vpc.main` ».
+
+`terraform plan` procède en trois temps :
+
+1. **Refresh** : pour chaque entrée du state, il interroge le réel et met la
+   photo à jour.
+2. **Comparaison** : il compare cette photo fraîche avec le code.
+3. **Proposition** : il liste les actions qui feraient correspondre le réel au
+   code.
+
+> Seuls les objets déjà dans le state sont rafraîchis. Terraform n'explore
+> jamais ton compte à la recherche d'objets inconnus.
+
 ### Le vocabulaire
 
 ```hcl
@@ -420,7 +480,7 @@ fait l'outil et ce que signifie chaque argument.
 from strands import tool
 
 @tool
-def lister_ressources_state(dossier: str = "01-exercice") -> str:
+def lister_ressources_state(dossier: str = "exercice-files") -> str:
     """Liste les ressources gérées par Terraform dans le state d'un dossier.
 
     Args:

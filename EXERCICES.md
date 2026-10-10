@@ -25,9 +25,21 @@ source scripts/env-localstack.sh
 
 ## Exercice 1 : créer le « legacy »
 
+**Il n'y a rien à coder dans cet exercice.** Tu mets en place l'infrastructure
+« historique » que tu devras extraire ensuite, puis tu l'observes. Le but est
+de constater qu'elle existe dans le **réel**, mais que Terraform ne la connaît
+pas (voir « State ou réel » dans la leçon 0 du [`TUTORIEL`](TUTORIEL.md)).
+
+### 1.a Créer l'infrastructure
+
 ```bash
 make setup
 ```
+
+Lance-le **une seule fois**. Chaque exécution crée un nouveau jeu de
+ressources et écrase les identifiants. Pour repartir de zéro :
+`make reset`, `make start`, puis `make setup`. Le détail du script est
+expliqué dans [`00-setup/EXPLICATION.md`](00-setup/EXPLICATION.md).
 
 Le script crée sept objets dans LocalStack :
 
@@ -38,15 +50,51 @@ Le script crée sept objets dans LocalStack :
 - un rôle IAM (Identity and Access Management) ;
 - l'attachement de la politique `AmazonS3ReadOnlyAccess` à ce rôle.
 
-Les identifiants sont écrits dans `01-exercice/terraform.tfvars`.
+Les identifiants sont écrits dans `exercice-files/terraform.tfvars`.
 
-Observe ce qui a été créé :
+### 1.b Observer le réel
+
+Charge d'abord les variables LocalStack dans ton terminal, sinon `aws` ne
+saura pas où envoyer ses requêtes :
+
+```bash
+source scripts/env-localstack.sh
+```
+
+Puis interroge ce qui a été créé :
 
 ```bash
 aws ec2 describe-vpcs --filters Name=tag:Projet,Values=terraform-lab
 aws s3 ls
 aws iam list-roles --query 'Roles[].RoleName'
+cat exercice-files/terraform.tfvars
 ```
+
+### 1.c Constater que Terraform ne voit rien
+
+```bash
+ls exercice-files/
+```
+
+Le dossier contient quatre fichiers, mais aucun n'est le state et aucun ne
+déclare de ressource :
+
+| Fichier | Origine | Rôle |
+|---|---|---|
+| `versions.tf` | fourni | Version de Terraform, provider AWS, région. Ne pas modifier. |
+| `variables.tf` | fourni | Déclare sept variables (`vpc_id`, `sg_id`…) sans valeur. |
+| `terraform.tfvars` | écrit par `make setup` | Donne leurs valeurs à ces variables : les identifiants du réel. |
+| `imports.tf` | fourni, **à compléter** | Un premier bloc `import` en exemple ; les autres sont pour l'exercice 2. |
+
+Il n'y a pas de fichier `terraform.tfstate` : le **state** n'existe pas encore.
+Il n'y a aucun bloc `resource` non plus. Pour Terraform, ces sept objets
+n'existent pas.
+
+C'est exactement la situation d'une mission d'extraction. Si tu écrivais
+maintenant `resource "aws_vpc" "main" {...}` et lançais `apply`, Terraform
+créerait un **deuxième** VPC au lieu de reprendre le premier. L'exercice 2
+corrige cela : les identifiants de `terraform.tfvars` servent à dire à
+Terraform « cet objet existant, c'est telle ressource de ton code ».
 
 <details>
 <summary><b>💡 Ce que tu dois voir</b> (clique pour déplier)</summary>
@@ -56,7 +104,7 @@ aws iam list-roles --query 'Roles[].RoleName'
   et `Projet = terraform-lab`.
 - `aws s3 ls` liste un bucket nommé `lab-tf-<horodatage>`.
 - `list-roles` contient `lab-app-role-<horodatage>`.
-- `01-exercice/terraform.tfvars` contient sept lignes : la région et six
+- `exercice-files/terraform.tfvars` contient, sous un en-tête de commentaires, sept lignes : la région et six
   identifiants. Note-les : ce sont les `id` de tes futurs blocs `import`.
 
 Si une commande `aws` répond `Could not connect to the endpoint URL`,
@@ -71,7 +119,16 @@ LocalStack n'est pas démarré (`make start`) ou tu as oublié
 
 ## Exercice 2 : importer et nettoyer jusqu'au plan vide
 
-Leçon associée : **Leçon 1**. Travaille dans `01-exercice/`.
+Leçon associée : **Leçon 1**. Travaille dans `exercice-files/`.
+
+**Ce qu'on attend de toi** : faire passer les objets créés à l'exercice 1 sous
+le contrôle de Terraform, sans en recréer ni en modifier aucun. Tu as réussi
+quand `tflocal plan` répond qu'il n'y a **aucun changement** à faire.
+
+Dans `exercice-files/`, un seul fichier est à toi : `imports.tf`. Les autres
+sont fournis (`versions.tf`, `variables.tf`) ou générés (`terraform.tfvars`),
+et l'en-tête de chacun dit qui l'a écrit et pourquoi. Tu vas aussi produire
+`generated.tf`, que Terraform écrit pour toi et que tu nettoies ensuite.
 
 ### 2.a Écrire les blocs `import`
 
@@ -141,7 +198,7 @@ import {
 ### 2.b Générer le code
 
 ```bash
-cd 01-exercice
+cd exercice-files
 tflocal init
 tflocal plan -generate-config-out=generated.tf
 ```
@@ -693,7 +750,7 @@ output "role_arn" {
 </details>
 
 👉 Corrigé : `corriges/ex3-modules/`. Pour l'utiliser, remplace les `.tf` de
-`01-exercice/` par ceux du corrigé, copie aussi le dossier `modules/`, et
+`exercice-files/` par ceux du corrigé, copie aussi le dossier `modules/`, et
 **garde ton `terraform.tfstate` et ton `terraform.tfvars`**. Lance ensuite
 `tflocal init && tflocal plan`.
 
@@ -709,15 +766,15 @@ Joue le collègue qui modifie le réel à la main. Les valeurs viennent de ton
 fichier `terraform.tfvars` :
 
 ```bash
-VPC_ID=$(grep vpc_id 01-exercice/terraform.tfvars | cut -d'"' -f2)
-SG_ID=$(grep sg_id 01-exercice/terraform.tfvars | cut -d'"' -f2)
+VPC_ID=$(grep vpc_id exercice-files/terraform.tfvars | cut -d'"' -f2)
+SG_ID=$(grep sg_id exercice-files/terraform.tfvars | cut -d'"' -f2)
 
 aws ec2 create-tags --resources "$VPC_ID" --tags Key=Owner,Value=stefan
 aws ec2 authorize-security-group-ingress --group-id "$SG_ID" \
   --protocol tcp --port 22 --cidr 0.0.0.0/0
 ```
 
-Puis, dans `01-exercice/` :
+Puis, dans `exercice-files/` :
 
 ```bash
 tflocal plan -refresh-only
@@ -955,7 +1012,7 @@ Dans un second terminal :
 
 ```bash
 make agent-ping
-make agent-ask Q="Quelles ressources sont dans le state de 01-exercice ?"
+make agent-ask Q="Quelles ressources sont dans le state de exercice-files ?"
 make agent-ask Q="Explique les blocs moved de corriges/ex3-modules"
 ```
 
@@ -975,7 +1032,7 @@ n'est pas lancé : `brew services start ollama`.
 
 ### 6.b Vérifier qu'il ne ment pas
 
-Compare la première réponse avec `cd 01-exercice && tflocal state list`.
+Compare la première réponse avec `cd exercice-files && tflocal state list`.
 L'agent a-t-il inventé une ressource ? En a-t-il oublié une ?
 
 Un petit modèle comme `llama3.2` (3 milliards de paramètres) se trompe plus
@@ -1065,13 +1122,13 @@ from outils_terraform import _dans_le_depot, resumer_state
 
 
 @tool
-def compter_par_type(dossier: str = "01-exercice") -> str:
+def compter_par_type(dossier: str = "exercice-files") -> str:
     """Compte les ressources gérées par Terraform dans le state d'un dossier du
     laboratoire, par type de ressource (par exemple « aws_subnet : 2 »).
     Utilise cet outil pour toute question du type « combien de ... ».
 
     Args:
-        dossier: dossier relatif à la racine du dépôt, par défaut "01-exercice".
+        dossier: dossier relatif à la racine du dépôt, par défaut "exercice-files".
     """
     fichier = _dans_le_depot(dossier) / "terraform.tfstate"
     if not fichier.exists():

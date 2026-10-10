@@ -53,12 +53,12 @@ def resumer_state(fichier_state: Path) -> list[dict]:
 
 
 @tool
-def lister_ressources_state(dossier: str = "01-exercice") -> str:
+def lister_ressources_state(dossier: str = "exercice-files") -> str:
     """Liste les ressources gérées par Terraform dans le state d'un dossier du
     laboratoire : adresse Terraform, type, identifiant AWS et tags.
 
     Args:
-        dossier: dossier relatif à la racine du dépôt, par défaut "01-exercice".
+        dossier: dossier relatif à la racine du dépôt, par défaut "exercice-files".
     """
     fichier = _dans_le_depot(dossier) / "terraform.tfstate"
     if not fichier.exists():
@@ -70,7 +70,7 @@ def lister_ressources_state(dossier: str = "01-exercice") -> str:
 
 
 @tool
-def lister_fichiers_terraform(dossier: str = "01-exercice") -> str:
+def lister_fichiers_terraform(dossier: str = "exercice-files") -> str:
     """Liste les fichiers .tf d'un dossier du laboratoire (sous-dossiers compris).
 
     Args:

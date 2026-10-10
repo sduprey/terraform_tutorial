@@ -2,11 +2,11 @@
 SHELL := /bin/bash
 
 # Toutes les cibles qui touchent à "AWS" visent LocalStack, jamais un vrai compte.
-LS_ENV := AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=eu-west-3 \
-          AWS_DEFAULT_REGION=eu-west-3 AWS_ENDPOINT_URL=http://localhost:4566 AWS_PROFILE=
+LS_ENV := env -u AWS_PROFILE AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=eu-west-3 \
+          AWS_DEFAULT_REGION=eu-west-3 AWS_ENDPOINT_URL=http://localhost:4566
 PY := .venv/bin/python
 MODELE ?= llama3.2
-Q ?= Quelles ressources sont dans le state de 01-exercice ?
+Q ?= Quelles ressources sont dans le state de exercice-files ?
 
 .PHONY: help install start stop status reset setup destroy-manual test validate clean \
         ollama-pull agent-run agent-ping agent-ask
@@ -40,7 +40,7 @@ test: ## Tests du générateur de blocs import
 
 validate: ## fmt + validate sur l'exercice et les corrigés (sans backend)
 	terraform fmt -check -recursive
-	@for d in 01-exercice corriges/ex2-plat corriges/ex3-modules; do \
+	@for d in exercice-files corriges/ex2-plat corriges/ex3-modules; do \
 	  echo "== $$d"; (cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
 	done
 

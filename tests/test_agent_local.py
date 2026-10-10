@@ -49,7 +49,7 @@ def test_chemin_hors_depot_refuse():
 
 
 def test_lecture_limitee_aux_fichiers_tf():
-    texte = outils.lire_fichier_terraform._tool_func("01-exercice/variables.tf")
+    texte = outils.lire_fichier_terraform._tool_func("exercice-files/variables.tf")
     assert 'variable "vpc_id"' in texte
     refus = outils.lire_fichier_terraform._tool_func("README.md")
     assert "Seuls les fichiers .tf" in refus

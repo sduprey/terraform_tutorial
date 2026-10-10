@@ -23,7 +23,7 @@ Ce que tu sauras faire à la fin :
 make install     # Terraform, AWS CLI, OrbStack (Docker), Ollama, tflocal, .venv Python
 make start       # démarre LocalStack et vérifie ec2, s3, iam, sts
 make setup       # exercice 1 : crée l'infrastructure "à la main" dans LocalStack
-cd 01-exercice
+cd exercice-files
 tflocal init
 tflocal plan -generate-config-out=generated.tf
 ```
@@ -33,7 +33,7 @@ Pour l'agent IA (exercice 6) :
 ```bash
 make ollama-pull   # télécharge le modèle llama3.2, une seule fois
 make agent-run     # sert l'agent sur http://localhost:8080
-make agent-ask Q="Quelles ressources sont dans le state de 01-exercice ?"
+make agent-ask Q="Quelles ressources sont dans le state de exercice-files ?"
 ```
 
 `make help` liste toutes les commandes.
@@ -68,7 +68,7 @@ make start
 | [`EXERCICES.md`](EXERCICES.md) | Les 6 exercices pas à pas, avec critères de réussite et **solution repliée sous chaque énoncé** |
 | `scripts/` | Installation macOS, pilotage de LocalStack, variables d'environnement |
 | `00-setup/` | Création et suppression de l'infrastructure « legacy » via l'AWS CLI |
-| `01-exercice/` | **Ton dossier de travail** |
+| `exercice-files/` | **Ton dossier de travail** (exercices 2 à 5) : tu complètes `imports.tf`, le reste est fourni ou généré |
 | `corriges/ex2-plat/` | Corrigé de l'import et du nettoyage |
 | `corriges/ex3-modules/` | Corrigé de la restructuration en modules (`moved`) |
 | `corriges/ex6-agent/` | Corrigé de l'outil ajouté à l'agent |

@@ -1,5 +1,16 @@
-# Point de départ de l'exercice 2. Ne modifie pas ce fichier : tout se passe
-# dans imports.tf, puis dans le code généré.
+# =============================================================================
+# versions.tf — FOURNI, NE PAS MODIFIER
+#
+# Qui l'a écrit : l'auteur du labo.
+#
+# Pourquoi : avant de pouvoir importer quoi que ce soit, Terraform doit savoir
+# quelle version utiliser, quel provider (le « pilote » AWS) télécharger et
+# dans quelle région travailler. C'est la configuration minimale commune à tous
+# les exercices.
+#
+# Ce qu'on attend de toi : rien. Tout se passe dans imports.tf, puis dans
+# generated.tf (le code que Terraform générera pour toi).
+# =============================================================================
 
 terraform {
   required_version = ">= 1.6" # blocs import avec variables

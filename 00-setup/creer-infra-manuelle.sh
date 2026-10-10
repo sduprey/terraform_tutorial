@@ -23,7 +23,7 @@ set -euo pipefail
 REGION="${AWS_REGION:-eu-west-3}"
 export AWS_REGION="$REGION"
 SUFFIX="$(date +%s)"
-OUT_DIR="$(cd "$(dirname "$0")/.." && pwd)/01-exercice"
+OUT_DIR="$(cd "$(dirname "$0")/.." && pwd)/exercice-files"
 
 tags() { # tags <type de ressource> <nom>
   echo "ResourceType=$1,Tags=[{Key=Name,Value=$2},{Key=Projet,Value=terraform-lab}]"
@@ -94,6 +94,9 @@ aws iam attach-role-policy --role-name "$ROLE_NAME" \
 # Les identifiants sont écrits dans terraform.tfvars : les blocs import de
 # l'exercice les lisent via des variables (possible depuis Terraform 1.6).
 cat > "$OUT_DIR/terraform.tfvars" <<EOF
+# Écrit automatiquement par \`make setup\` (00-setup/creer-infra-manuelle.sh).
+# Ne pas modifier : ce sont les identifiants des objets créés dans LocalStack.
+# Terraform charge ce fichier tout seul et remplit les variables de variables.tf.
 region      = "$REGION"
 vpc_id      = "$VPC_ID"
 subnet_a_id = "$SUBNET_A_ID"
@@ -106,5 +109,5 @@ EOF
 cp "$OUT_DIR/terraform.tfvars" "$(dirname "$0")/ids-crees.tfvars"
 
 echo
-echo "Terminé. Identifiants écrits dans 01-exercice/terraform.tfvars :"
+echo "Terminé. Identifiants écrits dans exercice-files/terraform.tfvars :"
 cat "$OUT_DIR/terraform.tfvars"

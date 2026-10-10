@@ -13,13 +13,13 @@ from outils_terraform import _dans_le_depot, resumer_state
 
 
 @tool
-def compter_par_type(dossier: str = "01-exercice") -> str:
+def compter_par_type(dossier: str = "exercice-files") -> str:
     """Compte les ressources gérées par Terraform dans le state d'un dossier du
     laboratoire, par type de ressource (par exemple « aws_subnet : 2 »).
     Utilise cet outil pour toute question du type « combien de ... ».
 
     Args:
-        dossier: dossier relatif à la racine du dépôt, par défaut "01-exercice".
+        dossier: dossier relatif à la racine du dépôt, par défaut "exercice-files".
     """
     fichier = _dans_le_depot(dossier) / "terraform.tfstate"
     if not fichier.exists():
