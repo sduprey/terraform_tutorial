@@ -44,9 +44,9 @@ case "${1:-}" in
     curl -s http://localhost:4566/_localstack/health | python3 -c '
 import json, sys
 s = json.load(sys.stdin)["services"]
-for nom in ("ec2", "s3", "iam", "sts"):
+for nom in ("ec2", "s3", "iam", "sts", "lambda", "sqs", "logs"):
     etat = s.get(nom, "absent")
-    print(f"  {nom:4s} : {etat}")
+    print(f"  {nom:6s} : {etat}")
 ' ;;
   *) echo "Usage : $0 start|stop|status|logs|reset"; exit 1 ;;
 esac

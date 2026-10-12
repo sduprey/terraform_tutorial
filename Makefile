@@ -8,7 +8,7 @@ PY := .venv/bin/python
 MODELE ?= llama3.2
 Q ?= Quelles ressources sont dans le state de exercice-files ?
 
-.PHONY: help install start stop status reset setup destroy-manual test validate clean \
+.PHONY: help install start stop status reset setup destroy-manual setup-lambda destroy-lambda \n        test validate clean \
         ollama-pull agent-run agent-ping agent-ask
 
 help: ## Affiche cette aide
@@ -35,12 +35,18 @@ setup: ## Exercice 1 : crée l'infrastructure "à la main" dans LocalStack
 destroy-manual: ## Supprime l'infrastructure du labo sans Terraform
 	$(LS_ENV) PATH=".venv/bin:$$PATH" ./00-setup/detruire-infra-manuelle.sh
 
+setup-lambda: ## Exercice 7 : crée l'application Lambda "à la main" dans LocalStack
+	$(LS_ENV) ./00-setup/creer-lambda-manuelle.sh
+
+destroy-lambda: ## Supprime l'application Lambda de l'exercice 7 sans Terraform
+	$(LS_ENV) ./00-setup/detruire-lambda-manuelle.sh
+
 test: ## Tests du générateur de blocs import
 	$(PY) -m pytest -q tests
 
 validate: ## fmt + validate sur l'exercice et les corrigés (sans backend)
 	terraform fmt -check -recursive
-	@for d in exercice-files corriges/ex2-plat corriges/ex3-modules; do \
+	@for d in exercice-files exercice-lambda corriges/ex2-plat corriges/ex3-modules corriges/ex7-lambda; do \
 	  echo "== $$d"; (cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
 	done
 

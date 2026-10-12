@@ -8,7 +8,9 @@ services:
       - "127.0.0.1:4566:4566"
     environment:
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
-      - SERVICES=ec2,s3,iam,sts,resourcegroupstaggingapi
+      - SERVICES=ec2,s3,iam,sts,resourcegroupstaggingapi,lambda,sqs,logs
       - PERSISTENCE=${PERSISTENCE:-0}
     volumes:
       - ./.localstack-data:/var/lib/localstack
+      # Lambda (exercice 7) : LocalStack lance chaque fonction dans un conteneur.
+      - /var/run/docker.sock:/var/run/docker.sock

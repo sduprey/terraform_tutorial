@@ -3,7 +3,8 @@
 Ce tutoriel accompagne les exercices de [`EXERCICES.md`](EXERCICES.md). Lis
 chaque leçon avant l'exercice correspondant. Les leçons 0 à 4 portent sur
 Terraform ; la leçon 5 sur un agent IA (intelligence artificielle) local avec
-Ollama et AgentCore.
+Ollama et AgentCore ; la leçon 6 revient à Terraform pour extraire des
+fonctions Lambda.
 
 Chaque leçon se termine par un lien vers l'exercice correspondant. Sous chaque
 énoncé, une **solution repliée** (« 💡 Solution ») te permet de vérifier ton
@@ -531,6 +532,72 @@ Processing Unit, processeur graphique) intégré.
    tester.
 
 > ▶ **À toi de jouer :** [Exercice 6 : agent IA local](EXERCICES.md#ex6). La solution est repliée juste sous chaque énoncé.
+
+---
+
+## Leçon 6 : extraire des fonctions Lambda
+
+### Le problème : le code n'est pas dans la configuration
+
+Une fonction Lambda s'importe comme le reste, par son nom :
+
+```hcl
+import {
+  to = aws_lambda_function.worker
+  id = "nom-de-la-fonction"
+}
+```
+
+`-generate-config-out` écrit toute sa **configuration** : runtime, handler,
+mémoire, timeout, variables d'environnement, rôle, tags. Mais pas son **code**.
+L'API de configuration ne renvoie que son empreinte (`CodeSha256`), et le
+zip n'est disponible que par une URL temporaire :
+
+```bash
+URL=$(aws lambda get-function --function-name nom-de-la-fonction   --query Code.Location --output text)
+curl -s -o code-recupere.zip "$URL"
+```
+
+Le code généré n'a donc ni `filename`, ni `s3_bucket`, et le plan refuse de
+tourner tant que tu n'en as pas ajouté un. C'est le piège classique : chez
+beaucoup de clients, ce zip est **la seule copie** du code en production.
+L'extraction Terraform est l'occasion de le remettre dans git.
+
+### Les ressources satellites
+
+Une fonction ne marche jamais seule. Chacune de ces ressources s'importe à
+part, avec son propre format d'`id` :
+
+| Ressource | Format de l'`id` |
+|---|---|
+| `aws_iam_role` (rôle d'exécution) | le nom du rôle |
+| `aws_cloudwatch_log_group` | `/aws/lambda/<nom de la fonction>` |
+| `aws_lambda_alias` | `<nom de la fonction>/<nom de l'alias>` |
+| `aws_lambda_event_source_mapping` (déclencheur SQS, Kinesis, DynamoDB) | l'UUID du déclencheur |
+| `aws_lambda_permission` (qui a le droit d'appeler la fonction) | `<nom de la fonction>/<statement id>` |
+| `aws_lambda_layer_version` | l'ARN de la version du layer |
+
+Les permissions n'apparaissent pas dans un inventaire : lis-les avec
+`aws lambda get-policy`. Le déclencheur non plus : `aws lambda list-event-source-mappings`.
+
+### Trois réflexes d'expert
+
+1. **Décider qui possède le code.** Si Terraform le déploie, le code va dans
+   `src/` et `archive_file` le zippe. Si un autre outil le déploie (SAM,
+   Serverless Framework, une chaîne CI/CD), Terraform ne gère que la
+   configuration :
+   ```hcl
+   lifecycle { ignore_changes = [filename, source_code_hash] }
+   ```
+   Jamais deux propriétaires : chacun écraserait le code de l'autre.
+2. **Se méfier des alias.** Un déclencheur branché sur un alias exécute la
+   version **publiée** vers laquelle pointe l'alias, pas `$LATEST`. Modifier le
+   code sans publier de version ne change donc rien en production.
+3. **Créer le groupe de journaux avant la fonction.** Sinon Lambda le crée
+   lui-même à la première exécution, sans rétention (journaux conservés à vie,
+   donc payés à vie), et Terraform échoue ensuite avec « already exists ».
+
+> ▶ **À toi de jouer :** [Exercice 7 : extraire une application Lambda](EXERCICES.md#ex7). La solution est repliée juste sous chaque énoncé.
 
 ---
 

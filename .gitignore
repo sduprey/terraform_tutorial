@@ -11,6 +11,10 @@ localstack_providers_override.tf
 # Écrits par 00-setup/creer-infra-manuelle.sh (identifiants propres à ton LocalStack)
 terraform.tfvars
 00-setup/ids-crees.tfvars
+00-setup/ids-lambda.tfvars
+# Zips de code Lambda (exercice 7) : récupérés ou reconstruits, jamais versionnés
+*.zip
+build/
 
 # --- LocalStack --------------------------------------------------------------
 .localstack-data/

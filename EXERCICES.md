@@ -379,6 +379,69 @@ resource "aws_iam_role_policy_attachment" "app_s3_read" {
 
 </details>
 
+#### Vérifier le plan après chaque modification
+
+Le principe : **une seule modification à la fois, puis un plan**. Si le plan
+affiche toujours `Plan: 8 to import, 0 to add, 0 to change, 0 to destroy.`, la
+modification est neutre et tu passes à la suivante. Sinon, tu sais exactement
+laquelle a créé l'écart.
+
+**Un retour court.** Le plan complet est long. Dans `exercice-files/`, définis
+une fonction qui n'en garde que l'essentiel :
+
+```bash
+verif() {
+  tflocal plan -no-color 2>&1 | grep -E '^Plan:|^No changes|^Error|will be (updated|created|destroyed)|must be replaced'
+}
+```
+
+Puis, après chaque modification, lance `verif`. Si tout va bien, une seule
+ligne s'affiche : `Plan: 8 to import, ...`. Sinon, tu vois aussi les ressources
+en cause, par exemple `# aws_subnet.a will be updated in-place`.
+
+**Lire l'écart.** Relance alors `tflocal plan` complet et regarde le bloc de la
+ressource signalée :
+
+| Ce que tu vois | Ce que ça veut dire | Quoi faire |
+|---|---|---|
+| `~ update in-place`, avec `~ attribut = "réel" -> "ton code"` | ton code ne décrit plus le réel | remets la ligne supprimée : ce n'était pas une valeur par défaut |
+| `-/+ must be replaced` | Terraform détruirait puis recréerait la ressource | **danger** : annule tout de suite (souvent un nom, un CIDR ou une zone modifiés) |
+| `+ create` | une ressource n'est plus reliée à son bloc `import` | vérifie que l'adresse (`aws_subnet.a`) est la même dans `imports.tf` et `main.tf` |
+| `Error: ...` | syntaxe ou référence cassée | lis le fichier et la ligne indiqués |
+
+**Un point de sauvegarde avec git.** Tant que le plan est bon, mets ton
+`main.tf` de côté dans l'index git, sans faire de commit :
+
+```bash
+git add main.tf            # le plan est bon : point de sauvegarde
+# ... modification, puis verif ...
+git diff main.tf           # ce qui a changé depuis la sauvegarde
+git checkout -- main.tf    # retour à la dernière version qui marchait
+```
+
+**Une vérification exacte, en JSON.** Une ressource importée sans écart a
+l'action `no-op`. Cette commande liste donc uniquement les ressources qui
+posent problème, et une sortie vide veut dire que tout est bon :
+
+```bash
+tflocal plan -out=p.tfplan >/dev/null
+tflocal show -json p.tfplan | jq -r '.resource_changes[] | select(.change.actions != ["no-op"]) | .address'
+```
+
+**L'ordre conseillé pour les six règles**, du plus sûr au plus délicat :
+
+1. Le tag `Projet`, puis `managed_policy_arns` et `inline_policy` :
+   `default_tags` et la ressource d'attachement prennent le relais.
+2. Les IDs remplacés par des références : la valeur ne change pas, seule son
+   écriture change.
+3. `jsonencode()` : le provider compare le JSON par son contenu, pas par sa
+   forme. Un écart signale une vraie faute de recopie.
+4. Les valeurs par défaut, **ligne par ligne** : c'est là que les écarts
+   apparaissent. Pour aller plus vite, supprime-en plusieurs d'un coup. Si le
+   plan bouge, `git diff` te montre lesquelles remettre.
+5. `prevent_destroy` : il ne change jamais le plan, c'est un garde-fou propre à
+   Terraform.
+
 ### 2.d Appliquer, puis retirer les imports
 
 ```bash
@@ -1173,5 +1236,443 @@ IAM sans droits d'écriture pour l'agent), et validation humaine obligatoire
 avant toute action qui modifie le réel. Dans une chaîne CI/CD (Continuous
 Integration / Continuous Delivery), l'agent peut proposer un plan, mais seul un
 humain l'approuve.
+
+</details>
+
+---
+
+<a id="ex7"></a>
+
+## Exercice 7 : extraire une application Lambda
+
+Leçon associée : **Leçon 6**. Travaille dans `exercice-lambda/`. Cet exercice
+est indépendant des exercices 2 à 5 : il a son propre dossier, donc son propre
+state.
+
+**Ce qu'on attend de toi** : faire passer sous Terraform une petite application
+Lambda déployée à la main (une file SQS, Simple Queue Service, qui déclenche une
+fonction Python), **en récupérant au passage son code**, qui n'existe nulle part
+ailleurs que dans AWS.
+
+Si LocalStack tournait déjà avant cet exercice, redémarre-le pour qu'il charge
+les services Lambda, SQS et CloudWatch Logs : `make stop`, puis `make start`.
+
+### 7.a Créer et observer
+
+```bash
+make setup-lambda
+source scripts/env-localstack.sh
+cat exercice-lambda/terraform.tfvars
+FN=$(grep function_name exercice-lambda/terraform.tfvars | cut -d'"' -f2)
+aws lambda get-function-configuration --function-name "$FN"
+aws lambda list-aliases --function-name "$FN"
+aws lambda list-event-source-mappings --function-name "$FN"
+```
+
+Question : **où est le code source de la fonction ?** Cherche-le dans le dépôt.
+
+Facultatif, pour la voir tourner : envoie un message dans la file, puis lis les
+journaux.
+
+```bash
+URL=$(grep queue_url exercice-lambda/terraform.tfvars | cut -d'"' -f2)
+aws sqs send-message --queue-url "$URL" --message-body "bonjour"
+aws logs tail "/aws/lambda/$FN" --since 5m
+```
+
+<details>
+<summary><b>💡 Solution 7.a : ce que tu dois voir</b> (clique pour déplier)</summary>
+
+**Le code n'est nulle part dans le dépôt.** Le script l'a écrit dans un dossier
+temporaire, l'a zippé, envoyé à AWS, puis a supprimé le dossier. C'est la
+situation de beaucoup de clients : une fonction déployée depuis un poste de
+travail, et la seule copie du code est celle qui tourne en production.
+
+Les autres points à remarquer :
+
+- `get-function-configuration` donne `CodeSha256`, l'empreinte du zip, mais
+  pas le code ;
+- `list-aliases` montre un alias `live` qui pointe vers la version `1` ;
+- dans `list-event-source-mappings`, `FunctionArn` se termine par `:live` : le
+  déclencheur appelle l'alias, pas la fonction directement.
+
+Le test facultatif a besoin que LocalStack puisse lancer des conteneurs (il
+le fait via `/var/run/docker.sock`, monté dans `docker-compose.yml`). Le
+journal affiche `Message reçu : bonjour`. S'il reste vide, attends quelques
+secondes : le premier appel télécharge l'image Python.
+
+</details>
+
+### 7.b Écrire les imports et générer le code
+
+Complète `exercice-lambda/imports.tf` : il te faut sept blocs, et le premier
+est donné. Puis :
+
+```bash
+cd exercice-lambda
+tflocal init
+tflocal plan -generate-config-out=generated.tf
+```
+
+Le plan va échouer sur la fonction. Lis le message, il annonce l'étape
+suivante.
+
+<details>
+<summary><b>💡 Solution 7.b : les sept blocs import et l'erreur attendue</b> (clique pour déplier)</summary>
+
+Trois pièges dans les identifiants : la file s'importe par son **URL**,
+l'alias et l'attachement de politique par un identifiant **composé**, et le
+déclencheur par son **UUID**.
+
+<!-- fichier: corriges/ex7-lambda/imports.tf -->
+`corriges/ex7-lambda/imports.tf` :
+
+```hcl
+# Corrigé de l'exercice 7 — les 7 blocs import.
+# À supprimer une fois le premier terraform apply passé.
+
+import {
+  to = aws_iam_role.lambda
+  id = var.role_name
+}
+
+# Format composé, et la politique est rangée sous service-role/ :
+# l'oublier donne une erreur « policy not attached » à l'import.
+import {
+  to = aws_iam_role_policy_attachment.lambda_sqs
+  id = "${var.role_name}/arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
+}
+
+# Une file SQS (Simple Queue Service) s'importe par son URL, pas par son nom.
+import {
+  to = aws_sqs_queue.jobs
+  id = var.queue_url
+}
+
+import {
+  to = aws_cloudwatch_log_group.worker
+  id = "/aws/lambda/${var.function_name}"
+}
+
+import {
+  to = aws_lambda_function.worker
+  id = var.function_name
+}
+
+# Format composé : "<nom de la fonction>/<nom de l'alias>"
+import {
+  to = aws_lambda_alias.live
+  id = "${var.function_name}/live"
+}
+
+# Le déclencheur n'a pas de nom : il s'importe par l'UUID qu'AWS lui a donné
+# (aws lambda list-event-source-mappings --function-name <fonction>).
+import {
+  to = aws_lambda_event_source_mapping.jobs
+  id = var.mapping_uuid
+}
+```
+
+L'erreur attendue, sur `aws_lambda_function` :
+
+```
+Error: Invalid combination of arguments
+  "filename": one of `filename,image_uri,s3_bucket` must be specified
+```
+
+Le générateur ne sait pas d'où vient le code : AWS ne le lui a pas donné. Les
+autres erreurs possibles sont les mêmes qu'à l'exercice 2 :
+
+| Message d'erreur (en substance) | Correction |
+|---|---|
+| `"name_prefix": conflicts with name` (file, groupe de journaux, rôle) | supprime `name_prefix` |
+| un avertissement de dépréciation sur `managed_policy_arns` ou `inline_policy` (rôle) | supprime-les |
+
+`generated.tf` est quand même écrit : c'est lui que tu complètes à l'étape
+suivante.
+
+</details>
+
+### 7.c Récupérer le code, puis nettoyer
+
+Télécharge le code qui tourne :
+
+```bash
+URL=$(aws lambda get-function --function-name "$FN" --query Code.Location --output text)
+curl -s -o code-recupere.zip "$URL"
+unzip -l code-recupere.zip
+```
+
+Dans `generated.tf`, ajoute à la fonction :
+
+```hcl
+  filename         = "code-recupere.zip"
+  source_code_hash = filebase64sha256("code-recupere.zip")
+```
+
+Renomme ensuite `generated.tf` en `main.tf` et nettoie-le avec les règles de la
+Leçon 1 : références au lieu des ARN (Amazon Resource Name) en dur, valeurs
+par défaut supprimées, tag `Projet` supprimé, politique d'approbation en
+`jsonencode()`. Ajoute enfin un `depends_on` de la fonction vers le groupe de
+journaux et vers l'attachement de politique.
+
+**Critère de réussite :** aucun ajout, aucune destruction.
+
+```
+Plan: 7 to import, 0 to add, 1 to change, 0 to destroy.
+```
+
+Le seul `~` toléré porte sur `aws_lambda_function.worker`, et seulement sur
+des attributs qui n'existent que dans Terraform, comme `filename`. Selon la
+version du provider, tu peux aussi obtenir `0 to change` : c'est aussi bon.
+
+<details>
+<summary><b>💡 Solution 7.c : les points à vérifier</b> (clique pour déplier)</summary>
+
+Compare surtout ces points avec ton code :
+
+- `role = aws_iam_role.lambda.arn`, et non `"arn:aws:iam::000000000000:role/..."` ;
+- dans le déclencheur, `event_source_arn = aws_sqs_queue.jobs.arn` et
+  `function_name = aws_lambda_alias.live.arn` ;
+- dans l'alias, `function_version = "1"` reste **en dur** : la version 1 a été
+  publiée à la main, et aucune ressource Terraform ne la porte ;
+- `batch_size = 5` et `visibility_timeout_seconds = 60` sont **gardés** : ce
+  ne sont pas les valeurs par défaut (10 et 30) ;
+- le nom du groupe de journaux est construit avec `var.function_name`, pas avec
+  `aws_lambda_function.worker.function_name` : la fonction dépend du groupe
+  (`depends_on`), une référence dans l'autre sens créerait un cycle.
+
+À ce stade, ta fonction ressemble au corrigé du 7.d, avec le zip récupéré à la
+place d'`archive_file` :
+
+```hcl
+resource "aws_lambda_function" "worker" {
+  function_name = var.function_name
+  description   = "Lab Terraform - traite les messages de la file lab-jobs"
+  role          = aws_iam_role.lambda.arn
+  runtime       = "python3.12"
+  handler       = "app.handler"
+  timeout       = 30
+  memory_size   = 256
+
+  filename         = "code-recupere.zip"
+  source_code_hash = filebase64sha256("code-recupere.zip")
+
+  environment {
+    variables = { NIVEAU_LOG = "INFO" }
+  }
+
+  tags = { Name = "lab-worker" }
+
+  depends_on = [
+    aws_cloudwatch_log_group.worker,
+    aws_iam_role_policy_attachment.lambda_sqs,
+  ]
+}
+```
+
+Pourquoi le `source_code_hash` ne bouge pas : AWS rend **exactement** le zip
+qu'on lui a envoyé, donc `filebase64sha256("code-recupere.zip")` est égal au
+`CodeSha256` lu à l'import. C'est ta preuve que le code récupéré est bien
+celui qui tourne.
+
+</details>
+
+### 7.d Reprendre la main sur le code
+
+```bash
+aws lambda get-function-configuration --function-name "$FN" --query CodeSha256
+tflocal apply            # le zip renvoyé est identique : CodeSha256 ne change pas
+aws lambda get-function-configuration --function-name "$FN" --query CodeSha256
+rm imports.tf
+tflocal plan             # "No changes."
+```
+
+Le zip n'est qu'un emballage. Range le code dans `src/`, là où il sera versionné
+et relu en merge request :
+
+```bash
+unzip code-recupere.zip -d src
+rm code-recupere.zip
+```
+
+Remplace `filename` et `source_code_hash` par un data source `archive_file` qui
+zippe `src/`, puis lance `tflocal plan`. Un changement apparaît alors que tu n'as
+pas touché au code. Explique pourquoi, puis applique-le.
+
+**Question d'expert :** modifie le message de log dans `src/app.py` et lance
+`tflocal apply`. Envoie ensuite un message dans la file. Quelle version du code
+le traite ? Que faut-il changer pour qu'une modification du code arrive vraiment
+en production ?
+
+<details>
+<summary><b>💡 Solution 7.d et réponse à la question d'expert</b> (clique pour déplier)</summary>
+
+**Le changement inattendu** porte sur `source_code_hash`. `archive_file`
+fabrique un nouveau zip : mêmes fichiers, mais dates, droits et compression
+différents, donc empreinte différente. Le plan affiche `1 to change`, et
+l'`apply` renvoie le code. C'est le **même code** dans un nouvel emballage : ce
+redéploiement est sans risque, mais annonce-le au client. C'est le moment où
+Terraform devient propriétaire du code.
+
+Si une autre chaîne déploie le code (SAM, Serverless Framework, GitHub
+Actions), ne fais pas cette bascule. Garde la configuration dans Terraform et
+laisse le code à l'autre outil :
+
+```hcl
+lifecycle { ignore_changes = [filename, source_code_hash] }
+```
+
+<!-- fichier: corriges/ex7-lambda/main.tf -->
+`corriges/ex7-lambda/main.tf` :
+
+```hcl
+# =============================================================================
+# Corrigé de l'exercice 7 — l'application Lambda après nettoyage (fin du 7.d).
+#
+# Ce qui a été fait par rapport au code généré :
+#   1. Ajout de la source du code, que le générateur ne peut pas écrire :
+#      AWS ne rend le zip que par une URL temporaire, jamais par l'API de
+#      configuration. Le code récupéré est rangé dans src/ et rezippé par
+#      archive_file.
+#   2. Suppression des valeurs par défaut (architectures, package_type,
+#      ephemeral_storage, tracing_config, logging_config, enabled, etc.).
+#   3. Remplacement des ARN (Amazon Resource Name) en dur par des références :
+#      rôle, file, alias.
+#   4. Politique d'approbation du rôle réécrite avec jsonencode().
+#   5. Suppression du tag Projet : default_tags s'en charge.
+#   6. depends_on vers le groupe de journaux : il doit exister avant la
+#      fonction, sinon Lambda le crée lui-même, sans rétention ni tags.
+#
+# Critère de réussite après 7.c : aucun ajout, aucune destruction.
+# Après 7.d : un seul changement, le source_code_hash de la fonction.
+# =============================================================================
+
+# --- Identité -----------------------------------------------------------------
+
+resource "aws_iam_role" "lambda" {
+  name        = var.role_name
+  description = "Lab Terraform - role d'execution Lambda"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = { Name = "lab-lambda-role" }
+}
+
+# Donne à la fonction le droit de lire la file et d'écrire ses journaux.
+resource "aws_iam_role_policy_attachment" "lambda_sqs" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole"
+}
+
+# --- File de messages ---------------------------------------------------------
+
+resource "aws_sqs_queue" "jobs" {
+  name                       = var.queue_name
+  visibility_timeout_seconds = 60 # AWS exige >= timeout de la fonction (30 s)
+
+  tags = { Name = "lab-jobs" }
+}
+
+# --- Fonction -----------------------------------------------------------------
+
+# Rezippe le code de src/ à chaque plan. Le hash ne change que si le code
+# change, et c'est lui qui déclenche le redéploiement.
+data "archive_file" "worker" {
+  type        = "zip"
+  source_dir  = "${path.module}/src"
+  output_path = "${path.module}/build/worker.zip"
+}
+
+# Nom construit à partir de la variable, pas de la fonction : la fonction
+# dépend du groupe (depends_on plus bas), une référence inverse ferait un cycle.
+resource "aws_cloudwatch_log_group" "worker" {
+  name              = "/aws/lambda/${var.function_name}"
+  retention_in_days = 14
+
+  tags = { Name = "lab-worker-logs" }
+}
+
+resource "aws_lambda_function" "worker" {
+  function_name = var.function_name
+  description   = "Lab Terraform - traite les messages de la file lab-jobs"
+  role          = aws_iam_role.lambda.arn
+  runtime       = "python3.12"
+  handler       = "app.handler"
+  timeout       = 30
+  memory_size   = 256
+
+  filename         = data.archive_file.worker.output_path
+  source_code_hash = data.archive_file.worker.output_base64sha256
+
+  environment {
+    variables = { NIVEAU_LOG = "INFO" }
+  }
+
+  tags = { Name = "lab-worker" }
+
+  depends_on = [
+    aws_cloudwatch_log_group.worker,
+    aws_iam_role_policy_attachment.lambda_sqs,
+  ]
+}
+
+# Version écrite en dur, et non aws_lambda_function.worker.version : sans
+# publish = true, cet attribut vaut "$LATEST". Conséquence : modifier le code
+# met à jour $LATEST, mais l'alias, donc le déclencheur, exécute toujours la
+# version 1 (voir la question d'expert du 7.d).
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  function_name    = aws_lambda_function.worker.function_name
+  function_version = "1"
+}
+
+# --- Déclencheur --------------------------------------------------------------
+
+# Branché sur l'alias, pas sur la fonction : c'est l'alias qui décide quelle
+# version reçoit les messages.
+resource "aws_lambda_event_source_mapping" "jobs" {
+  event_source_arn = aws_sqs_queue.jobs.arn
+  function_name    = aws_lambda_alias.live.arn
+  batch_size       = 5
+}
+```
+
+**Réponse à la question d'expert.** Le message est traité par **l'ancien
+code**. L'`apply` a mis à jour `$LATEST`, mais le déclencheur appelle l'alias
+`live`, qui pointe toujours vers la version `1`. Le nouveau code est bien
+déployé, mais rien ne l'exécute.
+
+Pour qu'une modification arrive en production, chaque déploiement doit publier
+une version et y faire pointer l'alias :
+
+```hcl
+resource "aws_lambda_function" "worker" {
+  # ...
+  publish = true # chaque changement de code publie une nouvelle version
+}
+
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  function_name    = aws_lambda_function.worker.function_name
+  function_version = aws_lambda_function.worker.version # "2", "3"...
+}
+```
+
+Le plan affiche alors deux changements : la fonction (nouvelle version publiée)
+et l'alias (de `1` vers la nouvelle version). Le retour arrière devient
+simple : remettre l'alias sur la version précédente, sans redéployer de code.
+C'est ce que les équipes appellent un déploiement par alias.
+
+**Pour finir**, détruis l'application : `tflocal destroy` (aucun
+`prevent_destroy` ici, une fonction se redéploie depuis `src/`). En cas de
+problème : `make destroy-lambda`.
 
 </details>
