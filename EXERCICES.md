@@ -912,6 +912,52 @@ tags = merge({ Name = "${var.name}-vpc" }, var.vpc_tags)
 vpc_tags = { Owner = "stefan" }
 ```
 
+**Peut-on adopter sans éditer le code à la main ?** Non : Terraform ne réécrit
+jamais le code d'une ressource qu'il gère déjà. C'est voulu. Le code est la
+source de vérité, relue en merge request, et un changement fait à la main ne
+doit pas y entrer sans qu'un humain l'ait décidé. Quatre outils aident
+quand même :
+
+- **`tflocal apply -refresh-only`** recopie le réel dans le **state**, sans
+  toucher ni au réel ni au code. Il ne suffit pas pour adopter le tag : au plan
+  suivant, Terraform compare le code (sans `Owner`) au state (avec `Owner`), et
+  propose à nouveau de retirer le tag.
+- **`tflocal state show aws_vpc.main`**, après le `-refresh-only`, affiche les
+  valeurs exactes du réel. Tu recopies alors la vraie valeur, sans risque de
+  faute de frappe.
+- **Regénérer la ressource.** `-generate-config-out` ne marche que pour une
+  ressource absente du code. On le contourne en important le même VPC sous une
+  adresse temporaire :
+
+  ```hcl
+  # drift.tf (temporaire)
+  import {
+    to = aws_vpc.drift
+    id = var.vpc_id
+  }
+  ```
+
+  `tflocal plan -generate-config-out=drift-genere.tf` écrit le VPC tel qu'il
+  est dans le réel, tag `Owner` compris. Compare-le avec `aws_vpc.main`,
+  reporte ce que tu adoptes, puis **supprime `drift.tf` et `drift-genere.tf`
+  sans jamais lancer `apply`** : sinon, deux adresses géreraient le même VPC.
+  C'est utile quand le drift touche beaucoup d'attributs.
+- **`lifecycle { ignore_changes = [tags["Owner"]] }`** fait accepter à
+  Terraform n'importe quelle valeur de ce tag, et il ne la corrige plus. Ce
+  n'est pas une adoption : tu renonces à gérer cet attribut. C'est le bon choix
+  quand un autre outil le pilote légitimement (tags de coût posés par un outil
+  FinOps, nombre d'instances changé par l'autoscaling). Pour un tag posé une
+  fois par un collègue, il deviendrait invisible.
+
+| Besoin | Outil |
+|---|---|
+| Adopter une valeur dans le code | éditer le `.tf`, aidé par `state show` ou la regénération |
+| Mettre à jour le state sans toucher au réel | `apply -refresh-only` |
+| Laisser un autre outil gérer un attribut | `ignore_changes` |
+
+Ici, l'édition à la main reste la bonne réponse : c'est un changement d'une
+ligne, qui passe en revue comme n'importe quel autre.
+
 **4. Corriger la règle :** ne touche pas au code. Lance `tflocal apply`. Le plan
 ne propose plus qu'une seule action :
 
