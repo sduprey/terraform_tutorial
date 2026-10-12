@@ -46,7 +46,8 @@ test: ## Tests du générateur de blocs import
 
 validate: ## fmt + validate sur l'exercice et les corrigés (sans backend)
 	terraform fmt -check -recursive
-	@for d in exercice-files exercice-lambda corriges/ex2-plat corriges/ex3-modules corriges/ex7-lambda; do \
+	@for d in exercice-files exercice-lambda exercice-neptune corriges/ex2-plat corriges/ex3-modules \
+	         corriges/ex7-lambda corriges/ex8-neptune; do \
 	  echo "== $$d"; (cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
 	done
 

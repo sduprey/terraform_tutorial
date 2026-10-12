@@ -3,8 +3,8 @@
 Ce tutoriel accompagne les exercices de [`EXERCICES.md`](EXERCICES.md). Lis
 chaque leçon avant l'exercice correspondant. Les leçons 0 à 4 portent sur
 Terraform ; la leçon 5 sur un agent IA (intelligence artificielle) local avec
-Ollama et AgentCore ; la leçon 6 revient à Terraform pour extraire des
-fonctions Lambda.
+Ollama et AgentCore ; les leçons 6 et 7 reviennent à Terraform pour
+extraire des fonctions Lambda et protéger une base de graphe Neptune.
 
 Chaque leçon se termine par un lien vers l'exercice correspondant. Sous chaque
 énoncé, une **solution repliée** (« 💡 Solution ») te permet de vérifier ton
@@ -598,6 +598,70 @@ Les permissions n'apparaissent pas dans un inventaire : lis-les avec
    donc payés à vie), et Terraform échoue ensuite avec « already exists ».
 
 > ▶ **À toi de jouer :** [Exercice 7 : extraire une application Lambda](EXERCICES.md#ex7). La solution est repliée juste sous chaque énoncé.
+
+---
+
+## Leçon 7 : une base de graphe avec Neptune
+
+### Les ressources
+
+Neptune, la base de graphe d'AWS, est gérée par le provider AWS habituel. Un
+cluster se compose de plusieurs ressources :
+
+| Ressource | Rôle | `id` d'import |
+|---|---|---|
+| `aws_neptune_subnet_group` | les sous-réseaux où vit le cluster | nom du groupe |
+| `aws_neptune_cluster` | le stockage, le chiffrement, les sauvegardes | identifiant du cluster |
+| `aws_neptune_cluster_instance` | les machines qui exécutent les requêtes (une d'écriture, les autres en lecture) | identifiant de l'instance |
+| `aws_neptune_cluster_parameter_group` | les paramètres du cluster (audit, timeouts) | nom du groupe |
+
+### Terraform gère la base, pas les données
+
+Comme le code d'une Lambda (Leçon 6), le **contenu** du graphe, ses sommets et
+ses arêtes, ne passe jamais par Terraform. On le charge avec le bulk loader de
+Neptune depuis S3, ou par des requêtes Gremlin, openCypher ou SPARQL. Terraform
+protège le contenant ; c'est d'autant plus important qu'il ne sait rien du
+contenu.
+
+### Deux protections plutôt qu'une
+
+```hcl
+resource "aws_neptune_cluster" "graphe" {
+  # ...
+  deletion_protection       = true  # AWS refuse la suppression, même depuis la console
+  skip_final_snapshot       = false # si la base est supprimée quand même, AWS en garde une copie
+  final_snapshot_identifier = "graphe-final"
+
+  lifecycle {
+    prevent_destroy = true # Terraform refuse tout plan qui détruirait la base
+  }
+}
+```
+
+`prevent_destroy` n'existe que dans Terraform : il n'empêche ni un clic dans la
+console, ni un collègue qui l'aurait retiré du code. `deletion_protection` est
+un réglage AWS : il ne protège pas de Terraform, qui peut le désactiver d'un
+`apply`. Les deux ensemble couvrent les deux chemins.
+
+### Les attributs qui détruisent
+
+Certains attributs ne peuvent pas être modifiés sur une base existante.
+Changer `storage_encrypted`, `kms_key_arn` ou le groupe de sous-réseaux affiche
+`-/+ must be replaced` : Terraform détruirait la base pour en créer une
+nouvelle, vide. Décide-les **à la création**, et lis toujours un plan de base
+de données ligne par ligne.
+
+Deux autres pièges :
+
+- **Le drift de version.** Les instances appliquent par défaut les mises à jour
+  mineures automatiquement. `engine_version` change alors chez AWS, et
+  Terraform veut revenir en arrière, ce qu'AWS refuse. Adopte la nouvelle
+  version dans le code, ou ajoute `ignore_changes = [engine_version]`.
+- **La fenêtre de maintenance.** Sans `apply_immediately = true`, certaines
+  modifications attendent la prochaine fenêtre de maintenance. L'`apply`
+  réussit et le plan suivant est vide, mais rien n'a encore changé.
+
+> ▶ **À toi de jouer :** [Exercice 8 : une base Neptune protégée](EXERCICES.md#ex8). La solution est repliée juste sous chaque énoncé.
 
 ---
 

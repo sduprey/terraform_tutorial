@@ -15,6 +15,8 @@ Ce que tu sauras faire à la fin :
 - générer automatiquement les blocs `import` d'un compte réel entier ;
 - extraire des fonctions Lambda en récupérant leur code, qui n'existe souvent
   que dans AWS ;
+- écrire et protéger une base de graphe Neptune, et repérer les plans qui
+  détruiraient ses données ;
 - faire tourner en local un agent IA (intelligence artificielle) qui lit ton
   code Terraform, avec Ollama, Strands Agents et le Runtime Amazon Bedrock
   AgentCore.
@@ -68,16 +70,18 @@ make start
 
 | Chemin | Rôle |
 |---|---|
-| [`TUTORIEL.md`](TUTORIEL.md) | Le cours : concepts, import, `moved`, drift, pièges, agent IA local, Lambda |
-| [`EXERCICES.md`](EXERCICES.md) | Les 7 exercices pas à pas, avec critères de réussite et **solution repliée sous chaque énoncé** |
+| [`TUTORIEL.md`](TUTORIEL.md) | Le cours : concepts, import, `moved`, drift, pièges, agent IA local, Lambda, Neptune |
+| [`EXERCICES.md`](EXERCICES.md) | Les 8 exercices pas à pas, avec critères de réussite et **solution repliée sous chaque énoncé** |
 | `scripts/` | Installation macOS, pilotage de LocalStack, variables d'environnement |
 | `00-setup/` | Création et suppression de l'infrastructure « legacy » via l'AWS CLI (réseau et application Lambda) |
 | `exercice-files/` | **Ton dossier de travail** (exercices 2 à 5) : tu complètes `imports.tf`, le reste est fourni ou généré |
 | `exercice-lambda/` | Dossier de travail de l'exercice 7 (fonctions Lambda), avec son propre state |
+| `exercice-neptune/` | Dossier de travail de l'exercice 8 (Neptune), validé hors ligne, sans AWS |
 | `corriges/ex2-plat/` | Corrigé de l'import et du nettoyage |
 | `corriges/ex3-modules/` | Corrigé de la restructuration en modules (`moved`) |
 | `corriges/ex6-agent/` | Corrigé de l'outil ajouté à l'agent |
 | `corriges/ex7-lambda/` | Corrigé de l'extraction Lambda, code de la fonction compris (`src/`) |
+| `corriges/ex8-neptune/` | Corrigé de la base Neptune protégée |
 | `outils/generer_imports.py` | Générateur de blocs `import` pour un vrai compte |
 | `agent-local/` | Agent IA : Strands Agents + Ollama, servi au format AgentCore Runtime |
 | `tests/` | Tests du générateur et de l'agent (sans Ollama) |

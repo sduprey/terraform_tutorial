@@ -1722,3 +1722,251 @@ C'est ce que les équipes appellent un déploiement par alias.
 problème : `make destroy-lambda`.
 
 </details>
+
+---
+
+<a id="ex8"></a>
+
+## Exercice 8 : une base Neptune protégée
+
+Leçon associée : **Leçon 7**. Travaille dans `exercice-neptune/`.
+
+Cet exercice se fait **sans AWS ni LocalStack** : Neptune n'existe pas dans
+LocalStack Community, et coûte plusieurs centaines d'euros par mois sur un vrai
+compte. Tu écris le code, Terraform le valide hors ligne, puis tu apprends à
+lire les plans dangereux. Le déploiement réel est facultatif (8.c).
+
+### 8.a Écrire la base
+
+Complète `exercice-neptune/neptune.tf`. Son en-tête liste ce qu'on attend : un
+groupe de sécurité, un groupe de sous-réseaux, le cluster et deux instances.
+Le réseau est fourni dans `reseau.tf`.
+
+```bash
+cd exercice-neptune
+terraform init -backend=false
+terraform fmt
+terraform validate
+```
+
+**Critère de réussite :** `Success! The configuration is valid.`, et ton
+cluster est protégé contre la suppression **deux fois** : côté Terraform et
+côté AWS.
+
+<details>
+<summary><b>💡 Solution 8.a : le neptune.tf complet</b> (clique pour déplier)</summary>
+
+Compare surtout ces points avec ton code :
+
+- `prevent_destroy` **et** `deletion_protection` : le premier bloque Terraform,
+  le second bloque AWS (console, CLI, autre outil) ;
+- `skip_final_snapshot = false` avec un `final_snapshot_identifier` : sans ce
+  nom, AWS refuse de supprimer le cluster ;
+- `storage_encrypted = true` dès la création : c'est le seul moment où il est
+  gratuit de le choisir ;
+- le groupe de sécurité n'ouvre que le port 8182, et seulement au VPC
+  (`aws_vpc.graphe.cidr_block`), jamais à `0.0.0.0/0`.
+
+<!-- fichier: corriges/ex8-neptune/neptune.tf -->
+`corriges/ex8-neptune/neptune.tf` :
+
+```hcl
+# =============================================================================
+# Corrigé de l'exercice 8 — une base de graphe Neptune protégée.
+#
+# Les choix à retenir :
+#   1. Deux protections contre la suppression, qui ne se remplacent pas :
+#      prevent_destroy (Terraform refuse le plan) et deletion_protection (AWS
+#      refuse l'appel, même depuis la console).
+#   2. skip_final_snapshot = false : si la base est quand même supprimée, AWS
+#      en garde une copie.
+#   3. storage_encrypted fixé dès la création : le changer plus tard force le
+#      remplacement du cluster, donc la perte des données.
+#   4. Les données du graphe ne passent jamais par Terraform : elles se chargent
+#      avec le bulk loader de Neptune ou par des requêtes Gremlin, openCypher
+#      ou SPARQL.
+# =============================================================================
+
+resource "aws_security_group" "neptune" {
+  name        = "lab-neptune"
+  description = "Lab Terraform - acces Neptune depuis le VPC"
+  vpc_id      = aws_vpc.graphe.id
+
+  ingress {
+    description = "Neptune (Gremlin, openCypher, SPARQL)"
+    protocol    = "tcp"
+    from_port   = 8182
+    to_port     = 8182
+    cidr_blocks = [aws_vpc.graphe.cidr_block]
+  }
+
+  tags = { Name = "lab-neptune" }
+}
+
+resource "aws_neptune_subnet_group" "graphe" {
+  name       = "lab-graphe"
+  subnet_ids = [aws_subnet.a.id, aws_subnet.b.id]
+
+  tags = { Name = "lab-graphe" }
+}
+
+resource "aws_neptune_cluster" "graphe" {
+  cluster_identifier                  = "lab-graphe"
+  engine                              = "neptune"
+  neptune_subnet_group_name           = aws_neptune_subnet_group.graphe.name
+  vpc_security_group_ids              = [aws_security_group.neptune.id]
+  storage_encrypted                   = true
+  iam_database_authentication_enabled = true
+  backup_retention_period             = 7
+  deletion_protection                 = true
+  skip_final_snapshot                 = false
+  final_snapshot_identifier           = "lab-graphe-final"
+
+  tags = { Name = "lab-graphe" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# count suffit ici : les deux instances sont interchangeables. La première
+# créée devient l'instance d'écriture ; en cas de panne, Neptune promeut
+# l'autre.
+resource "aws_neptune_cluster_instance" "graphe" {
+  count              = 2
+  identifier         = "lab-graphe-${count.index}"
+  cluster_identifier = aws_neptune_cluster.graphe.id
+  instance_class     = "db.t4g.medium"
+
+  tags = { Name = "lab-graphe-${count.index}" }
+}
+```
+
+</details>
+
+### 8.b Lire les plans dangereux
+
+Trois collègues ont modifié `neptune.tf` et te montrent leur plan. Pour
+chacun : faut-il l'appliquer ? Que va-t-il se passer pour la base et ses
+données ?
+
+**Plan A**, qui augmente la taille des instances :
+
+```
+  # aws_neptune_cluster_instance.graphe[0] will be updated in-place
+  ~ resource "aws_neptune_cluster_instance" "graphe" {
+      ~ instance_class = "db.t4g.medium" -> "db.r6g.large"
+    }
+  # aws_neptune_cluster_instance.graphe[1] will be updated in-place
+  ...
+Plan: 0 to add, 2 to change, 0 to destroy.
+```
+
+**Plan B**, d'un collègue qui a retiré `prevent_destroy` « pour tester » :
+
+```
+  # aws_neptune_cluster.graphe must be replaced
+-/+ resource "aws_neptune_cluster" "graphe" {
+      ~ kms_key_arn = "arn:aws:kms:eu-west-3:111122223333:key/aaaa..." -> "arn:aws:kms:eu-west-3:111122223333:key/bbbb..." # forces replacement
+      ...
+    }
+Plan: 1 to add, 0 to change, 1 to destroy.
+```
+
+**Plan C**, sans que personne n'ait touché au code :
+
+```
+  # aws_neptune_cluster.graphe will be updated in-place
+  ~ resource "aws_neptune_cluster" "graphe" {
+      ~ engine_version = "1.3.2.1" -> "1.3.2.0"
+    }
+Plan: 0 to add, 1 to change, 0 to destroy.
+```
+
+<details>
+<summary><b>💡 Solution 8.b : les trois diagnostics</b> (clique pour déplier)</summary>
+
+**Plan A : à appliquer, mais pas n'importe quand.** `update in-place` ne
+détruit rien : les données sont dans le stockage du cluster, pas dans les
+instances. Mais changer de classe redémarre chaque instance, donc coupe les
+requêtes quelques minutes. Sans `apply_immediately = true`, le changement
+attend la fenêtre de maintenance : l'`apply` réussit, et rien ne change avant
+la nuit suivante. Applique-le dans un créneau annoncé.
+
+**Plan B : à refuser.** `must be replaced` veut dire que Terraform détruirait
+le cluster, puis en créerait un **vide**, chiffré avec la nouvelle clé KMS (Key
+Management Service). Les données ne sont pas migrées. Si `deletion_protection`
+est resté à `true`, l'`apply` échoue à la destruction, et c'est ta deuxième
+ceinture de sécurité. Le changement de clé passe par une autre procédure : un
+snapshot, copié avec la nouvelle clé, restauré dans un nouveau cluster, puis
+une bascule des clients.
+
+Remets `prevent_destroy`. Avec lui, ce plan n'aurait même pas été affiché :
+
+```
+Error: Instance cannot be destroyed
+
+Resource aws_neptune_cluster.graphe has lifecycle.prevent_destroy set, but the
+plan calls for this resource to be destroyed.
+```
+
+**Plan C : à ne pas appliquer.** C'est un drift (Leçon 3) : AWS a appliqué une
+mise à jour mineure automatique, et le réel est en `1.3.2.1`. Terraform
+propose de revenir en arrière, ce qu'AWS refuse : on ne rétrograde pas une
+base. Deux réponses possibles :
+
+- **adopter** la nouvelle version : `engine_version = "1.3.2.1"` dans le code ;
+- **laisser AWS gérer la version** :
+  ```hcl
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [engine_version]
+  }
+  ```
+  C'est un usage légitime d'`ignore_changes` : un autre acteur (AWS) pilote
+  cet attribut, et il le fait volontairement.
+
+</details>
+
+### 8.c Facultatif : déployer, puis essayer de détruire
+
+Il te faut **LocalStack Pro** (le jeton du [`README`](README.md), avec `neptune`
+ajouté à `SERVICES` dans `docker-compose.yml`) ou un **vrai compte AWS**. Sur
+un vrai compte, compte environ 20 minutes de création et pense à tout détruire
+le jour même.
+
+```bash
+tflocal init       # terraform sur un vrai compte
+tflocal apply
+tflocal destroy
+```
+
+**Question d'expert :** le `destroy` échoue. Liste, dans l'ordre, tout ce qu'il
+faut faire pour supprimer vraiment la base, et ce qui restera ensuite chez AWS.
+
+<details>
+<summary><b>💡 Solution 8.c et réponse à la question d'expert</b> (clique pour déplier)</summary>
+
+Le premier `destroy` est refusé par Terraform, avant tout appel à AWS, à cause
+de `prevent_destroy`. Pour supprimer vraiment la base :
+
+1. Retirer `prevent_destroy` du code.
+2. Passer `deletion_protection = false`, puis lancer `tflocal apply`. Comme
+   pour `force_destroy` à l'exercice 5, le réglage doit être appliqué **avant**
+   le `destroy`.
+3. Lancer `tflocal destroy`.
+
+Ce qui reste ensuite chez AWS : le **snapshot final** `lab-graphe-final`. Il
+n'est pas dans le state, donc Terraform ne le supprime pas, et il est facturé
+au stockage. C'est voulu : c'est ta dernière copie des données. Supprime-le à
+la main quand tu es sûr de ne plus en avoir besoin :
+
+```bash
+aws neptune delete-db-cluster-snapshot --db-cluster-snapshot-identifier lab-graphe-final
+```
+
+Si tu oublies, le **prochain** `destroy` d'un cluster du même nom échouera :
+le nom `lab-graphe-final` est déjà pris. Sur un vrai projet, on ajoute souvent
+une date au nom du snapshot final.
+
+</details>

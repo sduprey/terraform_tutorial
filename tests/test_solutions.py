@@ -25,7 +25,7 @@ def test_les_solutions_recopiees_sont_a_jour():
 
 def test_chaque_exercice_a_sa_solution():
     sections = re.split(r'<a id="ex\w+"></a>', EXERCICES)[1:]
-    assert len(sections) == 8  # exercices 1 à 7 + bonus
+    assert len(sections) == 9  # exercices 1 à 8 + bonus
     for i, section in enumerate(sections):
         assert "💡" in section, f"section {i + 1} sans solution"
 
